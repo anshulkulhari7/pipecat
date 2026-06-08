@@ -48,7 +48,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use AWS services, you need to `pip install pipecat-ai[aws]`.")
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 
 @dataclass
@@ -86,7 +86,7 @@ class AWSTranscribeSTTService(WebsocketSTTService):
 
         Args:
             api_key: AWS secret access key. If None, falls back to environment
-                variables and the default boto3 credential chain (instance
+                variables and the default botocore credential chain (instance
                 profiles, IRSA, ECS task roles, SSO, etc.).
             aws_access_key_id: AWS access key ID. Same fallback behaviour as
                 ``api_key``.
@@ -136,7 +136,7 @@ class AWSTranscribeSTTService(WebsocketSTTService):
         self._show_speaker_label = False
         self._enable_channel_identification = False
 
-        # Resolve credentials using the shared chain (explicit → env → boto3).
+        # Resolve credentials using the shared chain (explicit → env → botocore).
         resolved = resolve_credentials(
             aws_access_key_id=aws_access_key_id,
             aws_secret_access_key=api_key,

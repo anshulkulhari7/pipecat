@@ -41,11 +41,16 @@ jobs:
           uv sync --group dev \
             --extra anthropic \
             --extra aws \
+            --extra azure \
+            --extra cli \
+            --extra daily \
             --extra deepgram \
             --extra google \
             --extra langchain \
             --extra livekit \
+            --extra pgmq \
             --extra piper \
+            --extra redis \
             --extra runner \
             --extra sagemaker \
             --extra tracing \

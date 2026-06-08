@@ -43,7 +43,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error("In order to use Inworld WebSocket TTS, you need to `pip install websockets`.")
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 from pipecat.frames.frames import (
     AggregationType,
@@ -1218,6 +1218,11 @@ class InworldTTSService(WebsocketTTSService):
         try:
             if not self._websocket or self._websocket.state is State.CLOSED:
                 await self._connect()
+
+            if self._websocket is None:
+                logger.warning(f"{self}: websocket unavailable after connect attempt, skipping TTS")
+                yield ErrorFrame(error="websocket unavailable")
+                return
 
             try:
                 if not self.audio_context_available(context_id):

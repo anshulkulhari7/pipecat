@@ -62,7 +62,7 @@ from pipecat.processors.frameworks.rtvi.frames import (
     RTVIServerMessageFrame,
     RTVIServerResponseFrame,
     RTVIUICommandFrame,
-    RTVIUITaskFrame,
+    RTVIUIJobGroupFrame,
 )
 from pipecat.processors.frameworks.rtvi.models import BotOutputTransformResult
 from pipecat.transports.base_output import BaseOutputTransport
@@ -506,9 +506,9 @@ class RTVIObserver(BaseObserver):
                 data=RTVI.UICommandData(command=frame.command, payload=frame.payload)
             )
             await self.send_rtvi_message(message)
-        elif isinstance(frame, RTVIUITaskFrame):
+        elif isinstance(frame, RTVIUIJobGroupFrame):
             if frame.data is not None:
-                message = RTVI.UITaskMessage(data=frame.data)
+                message = RTVI.UIJobGroupMessage(data=frame.data)
                 await self.send_rtvi_message(message)
         elif isinstance(frame, RTVIServerResponseFrame):
             if frame.error is not None:

@@ -44,7 +44,7 @@ try:
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
     logger.error('In order to use Gradium, you need to `pip install "pipecat-ai[gradium]"`.')
-    raise Exception(f"Missing module: {e}")
+    raise ImportError(f"Missing module: {e}") from e
 
 # Seconds to wait after a "flushed" message for trailing text tokens to arrive
 # before finalizing the transcription.
@@ -110,7 +110,7 @@ class GradiumSTTSettings(STTSettings):
         delay_in_frames: Delay in audio frames (80ms each) before text is
             generated. Higher delays allow more context but increase latency.
             Allowed values: 7, 8, 10, 12, 14, 16, 20, 24, 36, 48.
-            Default is 10 (800ms). Lower values like 7-8 give faster response.
+            Default is 12 (960ms). Lower values like 7-8 give faster response.
     """
 
     delay_in_frames: int | None | _NotGiven = field(default_factory=lambda: NOT_GIVEN)
@@ -199,7 +199,7 @@ class GradiumSTTService(WebsocketSTTService):
         default_settings = self.Settings(
             model="default",
             language=None,
-            delay_in_frames=None,
+            delay_in_frames=12,
         )
 
         # 2. (No step 2, as there are no deprecated direct args)
