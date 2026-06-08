@@ -243,6 +243,15 @@ class RTVIObserver(BaseObserver):
         except (ValueError, TypeError):
             return False
 
+    @property
+    def _is_legacy_client(self) -> bool:
+        """Return True when the connected client uses the deprecated 1.4.x protocol."""
+        if not self._rtvi:
+            return False
+        v = self._rtvi.client_version
+        legacy_major, legacy_minor = RTVI.LEGACY_SUPPORTED_VERSION
+        return v[0] == legacy_major and v[1] == legacy_minor
+
     def add_bot_output_transformer(
         self,
         transform_function: Callable[..., Awaitable[BotOutputTransformResult | str]],
@@ -583,6 +592,11 @@ class RTVIObserver(BaseObserver):
 
     async def _handle_tts_progress(self, frame: TTSProgressTextFrame):
         """Handle TTS progress frames."""
+        # 1.4.x clients use the old separate bot-output-progress event which was never
+        # released, so progress events are simply not sent to legacy clients.
+        if self._is_legacy_client:
+            return
+
         logger.trace(
             f"{self} TTS progress: context_id={frame.context_id} "
             f"source_segment_id={frame.segment_id} "
@@ -606,11 +620,18 @@ class RTVIObserver(BaseObserver):
                     remaining = await transform(remaining, agg_type)
 
         if self._params.bot_output_enabled:
-            message = RTVI.BotOutputProgressMessage(
-                data=RTVI.BotOutputProgressMessageData(
+            spoken_status: RTVI.SpokenStatus = "completed" if remaining == "" else "in-progress"
+            message = RTVI.BotOutputMessage(
+                data=RTVI.BotOutputMessageData(
+                    text=frame.text,
+                    will_be_spoken=True,
+                    aggregated_by=agg_type,
                     segment_id=frame.segment_id,
-                    accumulated_text=accumulated,
-                    remaining_text=remaining,
+                    spoken_status=spoken_status,
+                    spoken_progress=RTVI.SpokenProgressData(
+                        accumulated_text=accumulated,
+                        remaining_text=remaining,
+                    ),
                 )
             )
             await self.send_rtvi_message(message)
@@ -624,8 +645,17 @@ class RTVIObserver(BaseObserver):
         ):
             return
 
-        text = frame.text
         agg_type = frame.aggregated_by
+
+        # For 2.0.0+ clients, word and token types are not emitted as bot-output events;
+        # word-level progress is covered by the spoken_status/spoken_progress fields.
+        if not self._is_legacy_client and agg_type in (
+            AggregationType.WORD,
+            AggregationType.TOKEN,
+        ):
+            return
+
+        text = frame.text
         for aggregation_type, transform, is_progress_aware in self._aggregation_transforms:
             if aggregation_type == agg_type or aggregation_type == "*":
                 if is_progress_aware:
@@ -635,17 +665,35 @@ class RTVIObserver(BaseObserver):
                 text = result.text if isinstance(result, BotOutputTransformResult) else result
 
         isTTS = isinstance(frame, TTSTextFrame)
-        if agg_type is not AggregationType.WORD:
+        if agg_type not in (AggregationType.WORD, AggregationType.TOKEN):
             logger.debug(
-                f"{self} Aggregated LLM text: {text}, {agg_type} spoken:{isTTS}, id: {frame.id}"
+                f"{self} Aggregated LLM text: {text}, {agg_type} "
+                f"will_be_spoken:{isTTS}, id: {frame.id}"
             )
 
         if self._params.bot_output_enabled:
-            message = RTVI.BotOutputMessage(
-                data=RTVI.BotOutputMessageData(
-                    text=text, spoken=isTTS, aggregated_by=agg_type, segment_id=frame.id
+            if self._is_legacy_client:
+                data = RTVI.BotOutputMessageData(
+                    text=text,
+                    spoken=isTTS,
+                    aggregated_by=agg_type,
+                    segment_id=frame.id,
                 )
-            )
+            else:
+                data = RTVI.BotOutputMessageData(
+                    text=text,
+                    will_be_spoken=isTTS,
+                    aggregated_by=agg_type,
+                    segment_id=frame.id,
+                    spoken_status="new" if isTTS else "completed",
+                    spoken_progress=RTVI.SpokenProgressData(
+                        accumulated_text="",
+                        remaining_text=text,
+                    )
+                    if isTTS
+                    else None,
+                )
+            message = RTVI.BotOutputMessage(data=data)
             await self.send_rtvi_message(message)
 
         if isTTS and self._params.bot_tts_enabled:

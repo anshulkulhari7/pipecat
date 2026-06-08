@@ -4,9 +4,9 @@
 # SPDX-License-Identifier: BSD 2-Clause License
 #
 
-"""RTVI protocol v1 message models.
+"""RTVI protocol v2 message models.
 
-Contains all RTVI protocol v1 message definitions and data structures.
+Contains all RTVI protocol v2 message definitions and data structures.
 Import this module under the ``RTVI`` alias to use as a namespace::
 
     import pipecat.processors.frameworks.rtvi.models as RTVI
@@ -27,7 +27,11 @@ from pipecat.frames.frames import (
 )
 
 # -- Constants --
-PROTOCOL_VERSION = "1.4.0"
+PROTOCOL_VERSION = "2.0.0"
+
+# -- Version compatibility --
+# 1.4.x clients are deprecated but still supported with the old bot-output format.
+LEGACY_SUPPORTED_VERSION = (1, 4)
 
 MESSAGE_LABEL = "rtvi-ai"
 MessageLiteral = Literal["rtvi-ai"]
@@ -345,6 +349,21 @@ class TextMessageData(BaseModel):
     text: str
 
 
+SpokenStatus = Literal["new", "in-progress", "completed"]
+
+
+class SpokenProgressData(BaseModel):
+    """Word-level TTS progress within a spoken segment.
+
+    Parameters:
+        accumulated_text: Text already spoken in this segment, including the current word.
+        remaining_text: Text not yet spoken in this segment.
+    """
+
+    accumulated_text: str
+    remaining_text: str
+
+
 class BotOutputTransformResult(BaseModel):
     """Return type for bot output transform functions.
 
@@ -366,44 +385,32 @@ class BotOutputMessageData(TextMessageData):
 
     Extends TextMessageData to include metadata about the output.
 
+    This class supports both protocol v1 (1.4.x) and v2 (2.0.0+) clients. The
+    observer populates different field subsets depending on the negotiated version;
+    ``send_rtvi_message`` serialises with ``exclude_none=True`` so each client
+    only sees the fields relevant to its version.
+
     Parameters:
-        spoken: Whether the text has been spoken by TTS.
         aggregated_by: What form the text is in (e.g., by word, sentence, etc.).
-        segment_id: ID of the source AggregatedTextFrame. Use this to correlate
-            bot-output messages with their corresponding bot-output-progress events.
+        segment_id: ID of the source AggregatedTextFrame.
+        spoken: **(v1 only)** Whether the text has been spoken by TTS.
+        will_be_spoken: **(v2+)** Whether the text will be spoken by TTS.
+        spoken_status: **(v2+)** Lifecycle status of the segment:
+            ``"new"`` on first emit, ``"in-progress"`` during word playback,
+            ``"completed"`` when the last word is spoken (or immediately for
+            non-spoken segments).
+        spoken_progress: **(v2+)** Accumulated / remaining text breakdown.
+            Present when ``will_be_spoken`` is ``True``.
     """
 
-    spoken: bool = False
     aggregated_by: AggregationType | str
     segment_id: int | None = None
-
-
-class BotOutputProgressMessageData(BaseModel):
-    """Data for bot output progress RTVI messages.
-
-    Parameters:
-        segment_id: ID of the AggregatedTextFrame being spoken. Matches the
-            segment_id on the corresponding bot-output message.
-        accumulated_text: Text already spoken in this segment, including the current word.
-        remaining_text: Text not yet spoken in this segment.
-    """
-
-    segment_id: int
-    accumulated_text: str
-    remaining_text: str
-
-
-class BotOutputProgressMessage(BaseModel):
-    """Message carrying word-level TTS progress within a spoken segment.
-
-    Emitted alongside each word-timestamp event. Clients can use segment_id
-    to correlate with the parent bot-output message and implement word-level
-    highlighting or karaoke-style display.
-    """
-
-    label: MessageLiteral = MESSAGE_LABEL
-    type: Literal["bot-output-progress"] = "bot-output-progress"
-    data: BotOutputProgressMessageData
+    # v1 field (protocol 1.4.x)
+    spoken: bool | None = None
+    # v2 fields (protocol 2.0.0+)
+    will_be_spoken: bool | None = None
+    spoken_status: SpokenStatus | None = None
+    spoken_progress: SpokenProgressData | None = None
 
 
 class BotOutputMessage(BaseModel):
