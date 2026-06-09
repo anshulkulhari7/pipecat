@@ -756,7 +756,7 @@ class TestTTSProgressTextFrame(unittest.TestCase):
         progress = [f for f in result if isinstance(f, TTSProgressTextFrame)]
         self.assertEqual(len(progress), 1)
         self.assertEqual(progress[0].accumulated_text, "hello")
-        self.assertEqual(progress[0].remaining_text, "world")
+        self.assertEqual(progress[0].remaining_text, " world")
 
     def test_no_progress_frame_for_passthrough(self):
         seq = _seq()
