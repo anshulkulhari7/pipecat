@@ -349,7 +349,7 @@ class TextMessageData(BaseModel):
     text: str
 
 
-SpokenStatus = Literal["new", "in-progress", "completed"]
+SpokenStatus = Literal["new", "in-progress", "completed"] | None
 
 
 class SpokenProgressData(BaseModel):

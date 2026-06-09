@@ -685,7 +685,6 @@ class RTVIObserver(BaseObserver):
                     spoken_status = "new"
                     progress = RTVI.SpokenProgressData(accumulated_text="", remaining_text=text)
             else:
-                # TODO: the spoken status here should be None, since this frame will not be spoken
                 spoken_status = None
                 progress = None
 
