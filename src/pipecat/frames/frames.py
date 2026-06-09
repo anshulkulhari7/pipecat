@@ -387,11 +387,14 @@ class AggregatedTextFrame(TextFrame):
         raw_text: The full matched text including start/end pattern delimiters, set when
             this frame was produced from a PatternMatch (e.g. a ``<code>...</code>`` block).
             None for ordinary sentence aggregations.
+        will_be_spoken: Whether the TTS service will speak this frame. Set to ``True``
+            by the TTS service just before synthesis. Defaults to ``False``.
     """
 
     aggregated_by: AggregationType | str
     context_id: str | None = None
     raw_text: str | None = None
+    will_be_spoken: bool = field(default=False, init=False)
 
 
 @dataclass

@@ -665,34 +665,39 @@ class RTVIObserver(BaseObserver):
                 text = result.text if isinstance(result, BotOutputTransformResult) else result
 
         isTTS = isinstance(frame, TTSTextFrame)
+        will_be_spoken = frame.will_be_spoken
         if agg_type not in (AggregationType.WORD, AggregationType.TOKEN):
             logger.debug(
                 f"{self} Aggregated LLM text: {text}, {agg_type} "
-                f"will_be_spoken:{isTTS}, id: {frame.id}"
+                f"will_be_spoken:{will_be_spoken}, id: {frame.id}"
             )
 
         if self._params.bot_output_enabled:
-            if self._is_legacy_client:
-                data = RTVI.BotOutputMessageData(
-                    text=text,
-                    spoken=isTTS,
-                    aggregated_by=agg_type,
-                    segment_id=frame.id,
-                )
-            else:
-                data = RTVI.BotOutputMessageData(
-                    text=text,
-                    will_be_spoken=isTTS,
-                    aggregated_by=agg_type,
-                    segment_id=frame.id,
-                    spoken_status="new" if isTTS else "completed",
-                    spoken_progress=RTVI.SpokenProgressData(
-                        accumulated_text="",
-                        remaining_text=text,
+            if will_be_spoken:
+                if isTTS:
+                    # push_text_frames path: TTSTextFrame arrives after synthesis completes
+                    spoken_status: RTVI.SpokenStatus = "completed"
+                    progress: RTVI.SpokenProgressData | None = RTVI.SpokenProgressData(
+                        accumulated_text=text, remaining_text=""
                     )
-                    if isTTS
-                    else None,
-                )
+                else:
+                    # word-timestamp path: AggregatedTextFrame arrives before synthesis starts
+                    spoken_status = "new"
+                    progress = RTVI.SpokenProgressData(accumulated_text="", remaining_text=text)
+            else:
+                # TODO: the spoken status here should be None, since this frame will not be spoken
+                spoken_status = None
+                progress = None
+
+            data = RTVI.BotOutputMessageData(
+                text=text,
+                spoken=isTTS,
+                will_be_spoken=will_be_spoken,
+                aggregated_by=agg_type,
+                segment_id=frame.id,
+                spoken_status=spoken_status,
+                spoken_progress=progress,
+            )
             message = RTVI.BotOutputMessage(data=data)
             await self.send_rtvi_message(message)
 
