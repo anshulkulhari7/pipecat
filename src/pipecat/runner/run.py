@@ -1694,10 +1694,7 @@ def main(parser: argparse.ArgumentParser | None = None):
         "--moq-serve-bind",
         type=str,
         default=None,
-        help=(
-            "Address the MOQ server binds to (serve mode). Defaults to "
-            "`[::]:<--moq-port>`."
-        ),
+        help=("Address the MOQ server binds to (serve mode). Defaults to `[::]:<--moq-port>`."),
     )
     parser.add_argument(
         "--moq-web-port",
