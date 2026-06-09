@@ -453,14 +453,17 @@ class WordCompletionTracker:
             return None
         return self._llm_text[: self._llm_pos]
 
-    def get_remaining_tts_text(self) -> str:
-        """Return the unspoken portion of tts_text, stripped of leading/trailing whitespace.
+    def get_remaining_tts_text(self, strip: bool = True) -> str:
+        """Return the unspoken portion of tts_text.
 
-        This is the text that the TTS provider has not yet confirmed via word-timestamp
-        events. Useful for force-completing a slot when the audio context ends before all
-        word-timestamp events have arrived.
+        Args:
+            strip: When True (default), leading/trailing whitespace is removed.
+                Set to False to preserve leading whitespace so that
+                ``get_accumulated_tts_text() + get_remaining_tts_text(strip=False)``
+                reconstructs the original text exactly.
         """
-        return self._tts_text[self._tts_pos :].strip()
+        remaining = self._tts_text[self._tts_pos :]
+        return remaining.strip() if strip else remaining
 
     def get_remaining_llm_text(self) -> str | None:
         """Return the unspoken portion of llm_text, stripped of leading/trailing whitespace.

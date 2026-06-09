@@ -358,7 +358,7 @@ class AggregatedFrameSequencer:
             text=slot.frame.text,
             aggregated_by=slot.frame.aggregated_by,
             accumulated_text=slot.tracker.get_accumulated_tts_text(),
-            remaining_text=slot.tracker.get_remaining_tts_text(),
+            remaining_text=slot.tracker.get_remaining_tts_text(strip=False),
         )
         frame.pts = pts
         return frame
