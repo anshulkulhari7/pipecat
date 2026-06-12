@@ -51,18 +51,19 @@ class TestRTVIClientReadyVersionHandling(unittest.IsolatedAsyncioTestCase):
 
     # -- Deprecated legacy version (1.4.x) ------------------------------------
 
-    async def test_legacy_version_1_4_0_sends_deprecation_warning(self):
-        """1.4.x clients receive a deprecation warning but the connection is allowed."""
-        data = RTVI.ClientReadyData(
-            version="1.4.0",
-            about=RTVI.AboutClientData(library="test-client"),
-        )
-        await self._call_handle_client_ready(data)
-        self.processor._send_error_response.assert_called_once()
-        warning_msg = self.processor._send_error_response.call_args[0][1]
-        self.assertIn("deprecated", warning_msg)
-        self.assertIn("1.4.0", warning_msg)
-        self.assertEqual(self.processor._client_version, [1, 4, 0])
+    # TODO: enable this once RTVI 2.0.0 is supported by all our client SDKs, and we start to emit the warnings again.
+    # async def test_legacy_version_1_4_0_sends_deprecation_warning(self):
+    #     """1.4.x clients receive a deprecation warning but the connection is allowed."""
+    #     data = RTVI.ClientReadyData(
+    #         version="1.4.0",
+    #         about=RTVI.AboutClientData(library="test-client"),
+    #     )
+    #     await self._call_handle_client_ready(data)
+    #     self.processor._send_error_response.assert_called_once()
+    #     warning_msg = self.processor._send_error_response.call_args[0][1]
+    #     self.assertIn("deprecated", warning_msg)
+    #     self.assertIn("1.4.0", warning_msg)
+    #     self.assertEqual(self.processor._client_version, [1, 4, 0])
 
     async def test_legacy_version_sets_client_ready(self):
         """1.4.x clients still become client-ready despite the warning."""
