@@ -633,7 +633,7 @@ class RTVIObserver(BaseObserver):
         for aggregation_type, transform, is_progress_aware in self._aggregation_transforms:
             if aggregation_type == agg_type or aggregation_type == "*":
                 if is_progress_aware:
-                    result = await transform(frame.text, agg_type, accumulated, remaining)
+                    result = await transform(text, agg_type, accumulated, remaining)
                     if isinstance(result, BotOutputTransformResult):
                         accumulated = result.accumulated_text or accumulated
                         remaining = result.remaining_text or remaining
@@ -673,11 +673,11 @@ class RTVIObserver(BaseObserver):
 
         # For 2.0.0+ clients, word and token types are not emitted as bot-output events;
         # word-level progress is covered by the spoken_status/spoken_progress fields.
-        if not self._is_legacy_client and agg_type in (
+        # bot-tts-text is a separate channel and is NOT suppressed here.
+        suppress_bot_output = not self._is_legacy_client and agg_type in (
             AggregationType.WORD,
             AggregationType.TOKEN,
-        ):
-            return
+        )
 
         text = frame.text
         for aggregation_type, transform, is_progress_aware in self._aggregation_transforms:
@@ -696,7 +696,7 @@ class RTVIObserver(BaseObserver):
                 f"will_be_spoken:{will_be_spoken}, id: {frame.id}"
             )
 
-        if self._params.bot_output_enabled:
+        if self._params.bot_output_enabled and not suppress_bot_output:
             if will_be_spoken:
                 if isTTS:
                     # push_text_frames path: TTSTextFrame arrives after synthesis completes
