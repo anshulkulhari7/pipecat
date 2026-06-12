@@ -391,7 +391,7 @@ class BotOutputMessageData(TextMessageData):
     only sees the fields relevant to its version.
 
     Parameters:
-        aggregated_by: What form the text is in (e.g., by word, sentence, etc.).
+        aggregated_by: What form the text is in (e.g., sentence, code, etc.).
         segment_id: ID of the source AggregatedTextFrame.
         spoken: **(v1 only)** Whether the text has been spoken by TTS.
         will_be_spoken: **(v2+)** Whether the text will be spoken by TTS.

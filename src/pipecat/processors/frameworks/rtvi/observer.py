@@ -235,7 +235,7 @@ class RTVIObserver(BaseObserver):
             ]
         ] = []
         for agg_type, fn in self._params.bot_output_transforms or []:
-            self._aggregation_transforms.append((agg_type, fn, self._check_progress_aware(fn)))
+            self.add_bot_output_transformer(fn, agg_type)
 
     @staticmethod
     def _check_progress_aware(fn: Callable) -> bool:
@@ -627,6 +627,7 @@ class RTVIObserver(BaseObserver):
 
         accumulated = frame.accumulated_text
         remaining = frame.remaining_text
+        text = frame.text
         agg_type = frame.aggregated_by
 
         for aggregation_type, transform, is_progress_aware in self._aggregation_transforms:
@@ -636,15 +637,17 @@ class RTVIObserver(BaseObserver):
                     if isinstance(result, BotOutputTransformResult):
                         accumulated = result.accumulated_text or accumulated
                         remaining = result.remaining_text or remaining
+                        text = result.text or text
                 else:
                     accumulated = await transform(accumulated, agg_type)
                     remaining = await transform(remaining, agg_type)
+                    text = await transform(text, agg_type)
 
         if self._params.bot_output_enabled:
             spoken_status: RTVI.SpokenStatus = "completed" if remaining == "" else "in-progress"
             message = RTVI.BotOutputMessage(
                 data=RTVI.BotOutputMessageData(
-                    text=frame.text,
+                    text=text,
                     will_be_spoken=True,
                     aggregated_by=agg_type,
                     segment_id=frame.segment_id,
