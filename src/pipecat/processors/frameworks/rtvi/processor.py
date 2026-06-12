@@ -384,15 +384,17 @@ class RTVIProcessor(FrameProcessor):
                 if client_major == server_major:
                     pass  # fully compatible
                 elif client_major == legacy_major and client_minor == legacy_minor:
+                    # TODO: enable this once RTVI 2.0.0 is supported by all our client SDKs.
                     # 1.4.x is deprecated but still served with the v1 bot-output format.
-                    legacy_warning = (
-                        f"RTVI client version {version} is deprecated. "
-                        f"Please upgrade to protocol {RTVI.PROTOCOL_VERSION}. "
-                        "The bot-output event format has changed in 2.0.0."
-                    )
-                    logger.warning(legacy_warning)
-                    await self._send_error_response(request_id, legacy_warning)
+                    # legacy_warning = (
+                    #     f"RTVI client version {version} is deprecated. "
+                    #     f"Please upgrade to protocol {RTVI.PROTOCOL_VERSION}. "
+                    #     "The bot-output event format has changed in 2.0.0."
+                    # )
+                    # logger.warning(legacy_warning)
+                    # await self._send_error_response(request_id, legacy_warning)
                     # version_error intentionally left as None — connection proceeds.
+                    logger.debug(f"Using RTVI client version {version}.")
                 else:
                     version_error = f"RTVI version {version} is not compatible with server protocol {RTVI.PROTOCOL_VERSION}."
             except ValueError:
