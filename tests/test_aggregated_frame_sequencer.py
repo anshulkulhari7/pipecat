@@ -778,6 +778,50 @@ class TestAggregatedTextProgressFrame(unittest.TestCase):
         self.assertEqual(progress[0].context_id, "ctx1")
         self.assertEqual(progress[0].segment_id, frame1.id)
 
+    def test_progress_uses_user_facing_text_not_tts_text(self):
+        """accumulated/remaining in the progress frame come from user_facing_text, not tts_text."""
+        seq = _seq()
+        frame = _spoken_frame("4111 1111 1111 1111")
+        tracker = WordCompletionTracker(
+            "<spell>4111 1111 1111 1111</spell>",
+            llm_text="<card>4111 1111 1111 1111</card>",
+            user_facing_text="4111 1111 1111 1111",
+        )
+        seq.register_spoken(frame, "ctx1", tracker, append_to_context=True)
+        result = seq.process_word("4111", pts=10, context_id="ctx1")
+        progress = [f for f in result if isinstance(f, AggregatedTextProgressFrame)]
+        self.assertEqual(len(progress), 1)
+        p = progress[0]
+        # user_facing_text has no SSML tags
+        self.assertEqual(p.accumulated_text, "4111")
+        self.assertEqual(p.remaining_text, " 1111 1111 1111")
+        # Sanity: tts accumulated includes the opening tag and would be different
+        self.assertNotEqual(p.accumulated_text, tracker.get_accumulated_tts_text())
+
+    def test_card_scenario_word_by_word(self):
+        """Progress accumulated/remaining track user_facing_text through all four digit groups."""
+        seq = _seq()
+        frame = _spoken_frame("4111 1111 1111 1111")
+        tracker = WordCompletionTracker(
+            "<spell>4111 1111 1111 1111</spell>",
+            llm_text="<card>4111 1111 1111 1111</card>",
+            user_facing_text="4111 1111 1111 1111",
+        )
+        seq.register_spoken(frame, "ctx1", tracker, append_to_context=True)
+
+        steps = [
+            ("4111", "4111", " 1111 1111 1111"),
+            ("1111", "4111 1111", " 1111 1111"),
+            ("1111", "4111 1111 1111", " 1111"),
+            ("1111", "4111 1111 1111 1111", ""),
+        ]
+        for word, exp_acc, exp_rem in steps:
+            result = seq.process_word(word, pts=10, context_id="ctx1")
+            progress = [f for f in result if isinstance(f, AggregatedTextProgressFrame)]
+            self.assertEqual(len(progress), 1, f"expected 1 progress frame after '{word}'")
+            self.assertEqual(progress[0].accumulated_text, exp_acc)
+            self.assertEqual(progress[0].remaining_text, exp_rem)
+
 
 # ---------------------------------------------------------------------------
 # CJK includes_inter_frame_spaces: per-call arg must reach the emitted frame
