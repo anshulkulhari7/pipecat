@@ -13,6 +13,7 @@ and LLM processing.
 
 from __future__ import annotations
 
+import asyncio
 import time
 import warnings
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -34,6 +35,8 @@ from pipecat.utils.time import nanoseconds_to_str
 from pipecat.utils.utils import obj_count, obj_id
 
 if TYPE_CHECKING:
+    from pipecat.adapters.schemas.direct_function import DirectFunction
+    from pipecat.adapters.schemas.function_schema import FunctionSchema
     from pipecat.processors.aggregators.llm_context import LLMContext, LLMContextMessage, NotGiven
     from pipecat.processors.frame_processor import FrameProcessor
     from pipecat.services.settings import ServiceSettings
@@ -667,15 +670,16 @@ class LLMMessagesTransformFrame(DataFrame):
 class LLMSetToolsFrame(DataFrame):
     """Frame containing tools for LLM function calling.
 
-    A frame containing a list of tools for an LLM to use for function calling.
-    The specific format depends on the LLM being used, but it should typically
-    contain JSON Schema objects.
+    Used to change the set of tools advertised to the LLM mid-conversation.
 
     Parameters:
-        tools: List of tool/function definitions for the LLM.
+        tools: The tools to advertise. May be a ``ToolsSchema``, a plain list of
+            direct functions and/or ``FunctionSchema`` objects (normalized to a
+            ``ToolsSchema``, with direct-function handlers auto-registered), a
+            list of provider-specific tool dicts, or ``NOT_GIVEN`` to clear tools.
     """
 
-    tools: list[dict] | ToolsSchema | NotGiven
+    tools: list[dict] | list[FunctionSchema | DirectFunction] | ToolsSchema | NotGiven
 
 
 @dataclass
@@ -1524,32 +1528,20 @@ class ServiceSwitcherRequestMetadataFrame(ControlFrame):
 
 
 #
-# Task frames
+# Worker frames
 #
 
 
 @dataclass
-class TaskFrame(ControlFrame):
-    """Base frame for task frames.
+class WorkerFrame(ControlFrame):
+    """Base frame for worker frames.
 
-    This is a base class for frames that are meant to be sent and handled
-    upstream by the pipeline task. This might result in a corresponding frame
-    sent downstream (e.g. `InterruptionTaskFrame` / `InterruptionFrame` or
-    `EndTaskFrame` / `EndFrame`).
-
-    """
-
-    pass
-
-
-@dataclass
-class TaskSystemFrame(SystemFrame):
-    """Base frame for task system frames.
-
-    This is a base class for frames that are meant to be sent and handled
-    upstream by the pipeline task. This might result in a corresponding frame
-    sent downstream (e.g. `InterruptionTaskFrame` / `InterruptionFrame` or
-    `EndTaskFrame` / `EndFrame`).
+    This is a base class for frames that are handled by the pipeline worker.
+    This might result in a corresponding frame sent downstream (e.g.
+    `InterruptionWorkerFrame` / `InterruptionFrame` or `EndWorkerFrame` /
+    `EndFrame`). Push these frames downstream (the default direction) so frames
+    queued ahead of them are processed first; pushing them upstream is also
+    supported.
 
     """
 
@@ -1557,12 +1549,28 @@ class TaskSystemFrame(SystemFrame):
 
 
 @dataclass
-class EndTaskFrame(TaskFrame, UninterruptibleFrame):
-    """Frame to request graceful pipeline task closure.
+class WorkerSystemFrame(SystemFrame):
+    """Base frame for worker system frames.
 
-    This is used to notify the pipeline task that the pipeline should be
+    This is a base class for system frames that are handled by the pipeline
+    worker. This might result in a corresponding frame sent downstream (e.g.
+    `InterruptionWorkerFrame` / `InterruptionFrame` or `CancelWorkerFrame` /
+    `CancelFrame`). They can be pushed in either direction (downstream is the
+    default); being system frames, they are processed immediately either way.
+
+    """
+
+    pass
+
+
+@dataclass
+class EndWorkerFrame(WorkerFrame, UninterruptibleFrame):
+    """Frame to request graceful pipeline worker closure.
+
+    This is used to notify the pipeline worker that the pipeline should be
     closed nicely (flushing all the queued frames) by pushing an EndFrame
-    downstream. This frame should be pushed upstream.
+    downstream. Push this frame downstream (the default direction) so frames
+    queued ahead of it are flushed before the pipeline ends.
 
     Parameters:
         reason: Optional reason for pushing an end frame.
@@ -1575,25 +1583,25 @@ class EndTaskFrame(TaskFrame, UninterruptibleFrame):
 
 
 @dataclass
-class StopTaskFrame(TaskFrame, UninterruptibleFrame):
-    """Frame to request pipeline task stop while keeping processors running.
+class StopWorkerFrame(WorkerFrame, UninterruptibleFrame):
+    """Frame to request pipeline worker stop while keeping processors running.
 
-    This is used to notify the pipeline task that it should be stopped as
+    This is used to notify the pipeline worker that it should be stopped as
     soon as possible (flushing all the queued frames) but that the pipeline
-    processors should be kept in a running state. This frame should be pushed
-    upstream.
+    processors should be kept in a running state. Push this frame downstream
+    (the default direction) so frames queued ahead of it are flushed first.
     """
 
     pass
 
 
 @dataclass
-class CancelTaskFrame(TaskSystemFrame):
-    """Frame to request immediate pipeline task cancellation.
+class CancelWorkerFrame(WorkerSystemFrame):
+    """Frame to request immediate pipeline worker cancellation.
 
-    This is used to notify the pipeline task that the pipeline should be
-    stopped immediately by pushing a CancelFrame downstream. This frame
-    should be pushed upstream.
+    This is used to notify the pipeline worker that the pipeline should be
+    stopped immediately by pushing a CancelFrame downstream. It can be pushed
+    in either direction; being a system frame, it is processed immediately.
 
     Parameters:
         reason: Optional reason for pushing a cancel frame.
@@ -1606,15 +1614,110 @@ class CancelTaskFrame(TaskSystemFrame):
 
 
 @dataclass
-class InterruptionTaskFrame(TaskSystemFrame):
+class InterruptionWorkerFrame(WorkerSystemFrame):
     """Frame indicating the pipeline should be interrupted.
 
-    This frame should be pushed upstream to indicate the pipeline should be
-    interrupted. The pipeline task converts this into an `InterruptionFrame`
-    and sends it downstream.
+    The pipeline worker converts this into an `InterruptionFrame` and sends it
+    downstream. It can be pushed in either direction; being a system frame, it
+    is processed immediately.
     """
 
     pass
+
+
+#
+# Deprecated task frame aliases (the pipeline "task" was renamed to "worker").
+#
+
+
+@dataclass
+class TaskFrame(WorkerFrame):
+    """Deprecated alias for :class:`WorkerFrame`.
+
+    .. deprecated:: 1.4.0
+        Use :class:`WorkerFrame` instead.
+    """
+
+    pass
+
+
+@dataclass
+class TaskSystemFrame(WorkerSystemFrame):
+    """Deprecated alias for :class:`WorkerSystemFrame`.
+
+    .. deprecated:: 1.4.0
+        Use :class:`WorkerSystemFrame` instead.
+    """
+
+    pass
+
+
+@dataclass
+class EndTaskFrame(EndWorkerFrame, TaskFrame):
+    """Deprecated alias for :class:`EndWorkerFrame`.
+
+    .. deprecated:: 1.4.0
+        Use :class:`EndWorkerFrame` instead.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+        warnings.warn(
+            "EndTaskFrame is deprecated, use EndWorkerFrame instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
+
+@dataclass
+class StopTaskFrame(StopWorkerFrame, TaskFrame):
+    """Deprecated alias for :class:`StopWorkerFrame`.
+
+    .. deprecated:: 1.4.0
+        Use :class:`StopWorkerFrame` instead.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+        warnings.warn(
+            "StopTaskFrame is deprecated, use StopWorkerFrame instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
+
+@dataclass
+class CancelTaskFrame(CancelWorkerFrame, TaskSystemFrame):
+    """Deprecated alias for :class:`CancelWorkerFrame`.
+
+    .. deprecated:: 1.4.0
+        Use :class:`CancelWorkerFrame` instead.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+        warnings.warn(
+            "CancelTaskFrame is deprecated, use CancelWorkerFrame instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
+
+@dataclass
+class InterruptionTaskFrame(InterruptionWorkerFrame, TaskSystemFrame):
+    """Deprecated alias for :class:`InterruptionWorkerFrame`.
+
+    .. deprecated:: 1.4.0
+        Use :class:`InterruptionWorkerFrame` instead.
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+        warnings.warn(
+            "InterruptionTaskFrame is deprecated, use InterruptionWorkerFrame instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
 
 #
@@ -1663,6 +1766,28 @@ class StopFrame(ControlFrame, UninterruptibleFrame):
 
 
 @dataclass
+class PipelineFlushFrame(ControlFrame, UninterruptibleFrame):
+    """Probe frame used to flush all in-flight frames from the pipeline.
+
+    Pushed downstream; the pipeline worker's sink bounces it back upstream, and
+    when it returns to the source the worker sets ``event``. Once that fires,
+    every frame queued ahead of the probe has completed the round-trip and been
+    processed. Useful to wait for the pipeline to drain (e.g. after an
+    interruption) before injecting a new frame.
+
+    This frame is marked as UninterruptibleFrame so the probe survives an
+    InterruptionFrame and still completes its round-trip.
+
+    Parameters:
+        event: Set by the worker when the probe completes its round-trip. The
+            initiator awaits it to know the pipeline has drained. Carried on the
+            frame so concurrent flushes stay isolated (each awaits its own).
+    """
+
+    event: asyncio.Event | None = field(default=None, compare=False)
+
+
+@dataclass
 class BotConnectedFrame(SystemFrame):
     """Frame indicating the bot has connected to the transport service.
 
@@ -1690,6 +1815,19 @@ class OutputTransportReadyFrame(ControlFrame):
     """Frame indicating that the output transport is ready.
 
     Indicates that the output transport is ready and able to receive frames.
+    """
+
+    pass
+
+
+@dataclass
+class InputTransportStartAudioStreamingFrame(ControlFrame):
+    """Frame asking the input transport to start audio input streaming.
+
+    Pushed downstream (e.g. by ``RTVIProcessor`` once the client is ready) so a
+    ``BaseInputTransport`` begins streaming audio from its source. Replaces
+    calling ``BaseInputTransport.start_audio_in_streaming()`` directly, keeping
+    cross-processor communication frame-based.
     """
 
     pass
@@ -1903,9 +2041,13 @@ class TTSStartedFrame(ControlFrame):
 
     Parameters:
         context_id: Unique identifier for this TTS context.
+        append_to_context: Whether the spoken text for this response will be
+            appended to the LLM context. Mirrors the value carried by the
+            response's TTSTextFrames.
     """
 
     context_id: str | None = None
+    append_to_context: bool = True
 
 
 @dataclass

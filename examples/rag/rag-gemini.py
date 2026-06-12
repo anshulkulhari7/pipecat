@@ -55,8 +55,6 @@ from dotenv import load_dotenv
 from google import genai  # pyright: ignore[reportAttributeAccessIssue]
 from loguru import logger
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -75,6 +73,7 @@ from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.transports.websocket.server import WebsocketServerParams
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
@@ -118,9 +117,13 @@ Here is the knowledge base you have access to:
 """
 
 
-async def query_knowledge_base(params: FunctionCallParams):
-    """Query the knowledge base for the answer to the question."""
-    logger.info(f"Querying knowledge base for question: {params.arguments['question']}")
+async def query_knowledge_base(params: FunctionCallParams, question: str):
+    """Query the knowledge base for the answer to the question.
+
+    Args:
+        question: The question to query the knowledge base with.
+    """
+    logger.info(f"Querying knowledge base for question: {question}")
 
     # for our case, the first two messages are the instructions and the user message
     # so we remove them.
@@ -161,6 +164,10 @@ async def query_knowledge_base(params: FunctionCallParams):
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
+    "eval": lambda: WebsocketServerParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -203,22 +210,9 @@ Your response will be turned into speech so use only simple words and punctuatio
             system_instruction=system_prompt,
         ),
     )
-    llm.register_function("query_knowledge_base", query_knowledge_base)
 
-    query_function = FunctionSchema(
-        name="query_knowledge_base",
-        description="Query the knowledge base for the answer to the question.",
-        properties={
-            "question": {
-                "type": "string",
-                "description": "The question to query the knowledge base with.",
-            },
-        },
-        required=["question"],
-    )
-    tools = ToolsSchema(standard_tools=[query_function])
-
-    context = LLMContext(tools=tools)
+    # Direct functions listed in the context are registered with the LLM automatically
+    context = LLMContext(tools=[query_knowledge_base])
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),

@@ -19,12 +19,13 @@ from pipecat import version as pipecat_version
 from pipecat.frames.frames import (
     CancelFrame,
     EndFrame,
-    EndTaskFrame,
+    EndWorkerFrame,
     ErrorFrame,
     Frame,
     FunctionCallResultFrame,
     InputAudioRawFrame,
     InputTransportMessageFrame,
+    InputTransportStartAudioStreamingFrame,
     LLMConfigureOutputFrame,
     LLMMessagesAppendFrame,
     OutputTransportMessageUrgentFrame,
@@ -42,7 +43,6 @@ from pipecat.processors.frameworks.rtvi.observer import RTVIObserver, RTVIObserv
 from pipecat.services.llm_service import (
     FunctionCallParams,  # TODO(aleix): we shouldn't import `services` from `processors`
 )
-from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_transport import BaseTransport
 
 
@@ -63,7 +63,15 @@ class RTVIProcessor(FrameProcessor):
         """Initialize the RTVI processor.
 
         Args:
-            transport: Transport layer for communication.
+            transport: Deprecated and ignored.
+
+                .. deprecated:: 1.4.0
+                    The processor no longer needs a transport reference. Audio
+                    input and audio-streaming start are now driven by frames
+                    (``InputAudioRawFrame`` and
+                    ``InputTransportStartAudioStreamingFrame``) pushed
+                    downstream. For client-ready audio gating, set
+                    ``audio_in_stream_on_start=False`` on the transport params.
             **kwargs: Additional arguments passed to parent class.
         """
         super().__init__(**kwargs)
@@ -78,18 +86,21 @@ class RTVIProcessor(FrameProcessor):
         # A task to process incoming transport messages.
         self._message_task: asyncio.Task | None = None
 
+        if transport is not None:
+            import warnings
+
+            warnings.warn(
+                "Passing 'transport' to RTVIProcessor is deprecated since 1.4.0 and is "
+                "ignored. Audio input and audio-streaming start are driven by frames; for "
+                "client-ready audio gating set audio_in_stream_on_start=False on the transport.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
         self._register_event_handler("on_bot_started")
         self._register_event_handler("on_client_ready")
         self._register_event_handler("on_client_message")
         self._register_event_handler("on_ui_message")
-
-        self._input_transport = None
-        self._transport = transport
-        if self._transport:
-            input_transport = self._transport.input()
-            if isinstance(input_transport, BaseInputTransport):
-                self._input_transport = input_transport
-                self._input_transport.enable_audio_in_stream_on_start(False)
 
     @property
     def client_version(self) -> list[int]:
@@ -298,7 +309,7 @@ class RTVIProcessor(FrameProcessor):
                         data = RTVI.ClientReadyData(version=version, about=about)
                     await self._handle_client_ready(message.id, data)
                 case "disconnect-bot":
-                    await self.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
+                    await self.push_frame(EndWorkerFrame())
                 case "client-message":
                     data = RTVI.RawClientMessageData.model_validate(message.data)
                     await self._handle_client_message(message.id, data)
@@ -395,17 +406,21 @@ class RTVIProcessor(FrameProcessor):
             await self._send_error_response(request_id, version_error)
 
         logger.debug(f"Client Details: {about}")
-        if self._input_transport:
-            await self._input_transport.start_audio_in_streaming()
+        # Ask the input transport to start streaming audio now that the client
+        # is ready.
+        await self.push_frame(InputTransportStartAudioStreamingFrame())
 
         self._client_ready_id = request_id
         await self.set_client_ready()
 
     async def _handle_audio_buffer(self, data):
-        """Handle incoming audio buffer data."""
-        if not self._input_transport:
-            return
+        """Handle incoming audio buffer data.
 
+        The RTVIProcessor is prepended to the very top of the pipeline, so
+        pushing ``InputAudioRawFrame`` downstream reaches the input transport,
+        which feeds it through its VAD/processing path. Frame-based so we don't
+        hold a transport reference.
+        """
         # Extract audio batch ensuring it's a list
         audio_list = data.get("base64AudioBatch") or [data.get("base64Audio")]
 
@@ -417,7 +432,7 @@ class RTVIProcessor(FrameProcessor):
                     sample_rate=data["sampleRate"],
                     num_channels=data["numChannels"],
                 )
-                await self._input_transport.push_audio_frame(frame)
+                await self.push_frame(frame)
 
         except (KeyError, TypeError, ValueError) as e:
             # Handle missing keys, decoding errors, and invalid types
@@ -428,6 +443,14 @@ class RTVIProcessor(FrameProcessor):
         opts = data.options if data.options is not None else RTVI.SendTextOptions()
         if opts.run_immediately:
             await self.interrupt_bot()
+            # Drain the pipeline before appending the new message. The
+            # interruption commits the in-progress assistant response into the
+            # context; flushing guarantees that lands *before* we append (and
+            # run) the new user message, so the context stays correctly ordered
+            # (otherwise the append can overtake the commit and the model
+            # continues the interrupted turn). This runs in the message task, so
+            # awaiting here doesn't block the frame loop that forwards the probe.
+            await self.pipeline_worker.flush_pipeline()
         cur_llm_skip_tts = self._llm_skip_tts
         should_skip_tts = not opts.audio_response
         toggle_skip_tts = cur_llm_skip_tts != should_skip_tts

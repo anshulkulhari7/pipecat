@@ -10,8 +10,6 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.function_schema import FunctionSchema
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import LLMRunFrame
 from pipecat.pipeline.pipeline import Pipeline
@@ -30,18 +28,28 @@ from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams
+from pipecat.transports.websocket.server import WebsocketServerParams
 from pipecat.workers.runner import WorkerRunner
 
 load_dotenv(override=True)
 
 
-async def store_user_emails(params: FunctionCallParams):
-    print(f"User emails: {params.arguments}")
+async def store_user_emails(params: FunctionCallParams, emails: list[str]):
+    """Store user emails when confirmed.
+
+    Args:
+        emails: The list of user emails.
+    """
+    print(f"User emails: {emails}")
 
 
 # We use lambdas to defer transport parameter creation until the transport
 # type is selected at runtime.
 transport_params = {
+    "eval": lambda: WebsocketServerParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -91,23 +99,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
     # You can aslo register a function_name of None to get all functions
     # sent to the same callback with an additional function_name parameter.
-    llm.register_function("store_user_emails", store_user_emails)
 
-    store_emails_function = FunctionSchema(
-        name="store_user_emails",
-        description="Store user emails when confirmed",
-        properties={
-            "emails": {
-                "type": "array",
-                "description": "The list of user emails",
-                "items": {"type": "string"},
-            },
-        },
-        required=["emails"],
-    )
-    tools = ToolsSchema(standard_tools=[store_emails_function])
-
-    context = LLMContext(tools=tools)
+    # Direct functions listed in the context are registered with the LLM automatically
+    context = LLMContext(tools=[store_user_emails])
     user_aggregator, assistant_aggregator = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),

@@ -105,7 +105,7 @@ try:
     )
 except ModuleNotFoundError as e:
     logger.error(f"Exception: {e}")
-    logger.error("In order to use Google AI, you need to `pip install pipecat-ai[google]`.")
+    logger.error('In order to use Google AI, you need to `uv add "pipecat-ai[google]"`.')
     raise ImportError(f"Missing module: {e}") from e
 
 
@@ -1924,8 +1924,6 @@ class GeminiLiveLLMService(LLMService[GeminiLLMAdapter]):
             self._transcription_timeout_task = self.create_task(
                 self._transcription_timeout_handler()
             )
-            # Let the event loop schedule the taks before it gets cancelled.
-            await asyncio.sleep(0)
 
     async def _handle_msg_output_transcription(self, message: LiveServerMessage):
         """Handle the output transcription message."""

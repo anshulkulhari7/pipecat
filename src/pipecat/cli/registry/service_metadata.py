@@ -111,6 +111,9 @@ FEATURE_DEFINITIONS: dict[str, list[str]] = {
     # Imported on the standard (non-PSTN/SIP) transport path: the collapsed bot()
     # calls create_transport. Dial-out and SIP construct their transports by hand.
     "create_transport": ["create_transport"],
+    # The "eval" transport entry (pc init --eval) needs WebsocketServerParams so the
+    # generated bot is runnable with `-t eval` for behavioral evals.
+    "eval": ["WebsocketServerParams"],
 }
 
 
@@ -430,6 +433,13 @@ class ServiceRegistry:
             class_name=["SpeechmaticsSTTService"],
             env_prefix="SPEECHMATICS",
             include_params=["api_key"],
+        ),
+        ServiceDefinition(
+            value="moonshine_stt",
+            label="Moonshine",
+            package="pipecat-ai[moonshine]",
+            class_name=["MoonshineSTTService"],
+            settings_params=["model"],
         ),
         ServiceDefinition(
             value="whisper_stt",

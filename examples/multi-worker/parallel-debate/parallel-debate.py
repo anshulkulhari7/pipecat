@@ -31,7 +31,7 @@ import os
 from dotenv import load_dotenv
 from loguru import logger
 
-from pipecat.adapters.schemas.tools_schema import ToolsSchema
+from pipecat.adapters.schemas.direct_function import tool_options
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.bus import BusJobRequestMessage
 from pipecat.frames.frames import LLMMessagesAppendFrame, LLMRunFrame
@@ -51,6 +51,7 @@ from pipecat.services.llm_service import FunctionCallParams
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.daily.transport import DailyParams
+from pipecat.transports.websocket.server import WebsocketServerParams
 from pipecat.workers.llm import LLMContextWorker
 from pipecat.workers.runner import WorkerRunner
 
@@ -73,6 +74,10 @@ ROLE_PROMPTS = {
 }
 
 transport_params = {
+    "eval": lambda: WebsocketServerParams(
+        audio_in_enabled=True,
+        audio_out_enabled=True,
+    ),
     "daily": lambda: DailyParams(
         audio_in_enabled=True,
         audio_out_enabled=True,
@@ -129,6 +134,7 @@ class DebateWorker(LLMContextWorker):
         )
 
 
+@tool_options(cancel_on_interruption=False, timeout_secs=60)
 async def debate(params: FunctionCallParams, topic: str):
     """Analyze a topic from multiple perspectives (advocate, critic, analyst).
 
@@ -169,9 +175,8 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             ),
         ),
     )
-    llm.register_direct_function(debate, cancel_on_interruption=False, timeout_secs=60)
 
-    context = LLMContext(tools=ToolsSchema(standard_tools=[debate]))
+    context = LLMContext(tools=[debate])
     aggregators = LLMContextAggregatorPair(
         context,
         user_params=LLMUserAggregatorParams(vad_analyzer=SileroVADAnalyzer()),

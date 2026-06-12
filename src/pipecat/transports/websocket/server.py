@@ -14,11 +14,15 @@ handling, and frame serialization.
 import asyncio
 import io
 import time
+import warnings
 import wave
 from collections.abc import Awaitable, Callable
 
+import websockets
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from websockets.asyncio.server import serve as websocket_serve
+from websockets.protocol import State
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -38,15 +42,7 @@ from pipecat.serializers.base_serializer import FrameSerializer
 from pipecat.transports.base_input import BaseInputTransport
 from pipecat.transports.base_output import BaseOutputTransport
 from pipecat.transports.base_transport import BaseTransport, TransportParams
-
-try:
-    import websockets
-    from websockets.asyncio.server import serve as websocket_serve
-    from websockets.protocol import State
-except ModuleNotFoundError as e:
-    logger.error(f"Exception: {e}")
-    logger.error("In order to use websockets, you need to `pip install pipecat-ai[websocket]`.")
-    raise ImportError(f"Missing module: {e}") from e
+from pipecat.utils.security.allowed_origins import default_allowed_origins
 
 
 class WebsocketServerParams(TransportParams):
@@ -56,11 +52,16 @@ class WebsocketServerParams(TransportParams):
         add_wav_header: Whether to add WAV headers to audio frames.
         serializer: Frame serializer for message encoding/decoding.
         session_timeout: Timeout in seconds for client sessions.
+        allowed_origins: List of allowed origins. Empty list allows all
+            origins. When set, connections with a missing or disallowed Origin header
+            are rejected. Defaults to ``PIPECAT_ALLOWED_ORIGINS`` env var
+            (comma-separated).
     """
 
     add_wav_header: bool = False
     serializer: FrameSerializer | None = None
     session_timeout: int | None = None
+    allowed_origins: list[str] = Field(default_factory=default_allowed_origins)
 
 
 class WebsocketServerCallbacks(BaseModel):
@@ -181,7 +182,10 @@ class WebsocketServerInputTransport(BaseInputTransport):
     async def _server_task_handler(self):
         """Handle WebSocket server startup and client connections."""
         logger.info(f"Starting websocket server on {self._host}:{self._port}")
-        async with websocket_serve(self._client_handler, self._host, self._port) as server:
+        origins = self._params.allowed_origins or None
+        async with websocket_serve(
+            self._client_handler, self._host, self._port, origins=origins
+        ) as server:
             await self._callbacks.on_websocket_ready()
             await self._stop_server_event.wait()
 
@@ -227,7 +231,11 @@ class WebsocketServerInputTransport(BaseInputTransport):
         await self._callbacks.on_client_disconnected(websocket)
 
         await websocket.close()
-        self._websocket = None
+        # Only clear if it's still ours: the next client may have already
+        # connected and replaced it (e.g. back-to-back evals on a kept-alive
+        # server), and we must not null out their connection.
+        if self._websocket is websocket:
+            self._websocket = None
 
         logger.info(f"Client {websocket.remote_address} disconnected")
 
@@ -284,8 +292,9 @@ class WebsocketServerOutputTransport(BaseOutputTransport):
             websocket: The WebSocket connection to set as active, or None to clear.
         """
         if self._websocket:
+            if websocket:
+                logger.warning("Only one client allowed, using new connection")
             await self._websocket.close()
-            logger.warning("Only one client allowed, using new connection")
         self._websocket = websocket
 
     async def start(self, frame: StartFrame):
@@ -422,6 +431,13 @@ class WebsocketServerTransport(BaseTransport):
     output transports, client connection management, and event handling for
     real-time audio and data streaming applications.
 
+    .. deprecated:: 1.4.0
+        :class:`WebsocketServerTransport` was intended for development and testing
+        only. It has a critical limitation: it only supports a single client at a
+        time. Use
+        :class:`~pipecat.transports.websocket.fastapi.FastAPIWebsocketTransport`
+        instead for production use.
+
     Event handlers available:
 
     - on_client_connected(transport, websocket): Client WebSocket connected
@@ -453,6 +469,14 @@ class WebsocketServerTransport(BaseTransport):
             input_name: Optional name for the input processor.
             output_name: Optional name for the output processor.
         """
+        warnings.warn(
+            "WebsocketServerTransport is deprecated and will be removed in a future version. "
+            "It was intended for development and testing only and has a critical limitation: "
+            "it only supports a single client at a time. "
+            "Use FastAPIWebsocketTransport instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         super().__init__(input_name=input_name, output_name=output_name)
         self._host = host
         self._port = port
