@@ -690,12 +690,6 @@ class RTVIObserver(BaseObserver):
 
         isTTS = isinstance(frame, TTSTextFrame)
         will_be_spoken = frame.will_be_spoken
-        if agg_type not in (AggregationType.WORD, AggregationType.TOKEN):
-            logger.debug(
-                f"{self} Aggregated LLM text: {text}, {agg_type} "
-                f"will_be_spoken:{will_be_spoken}, id: {frame.id}"
-            )
-
         if self._params.bot_output_enabled and not suppress_bot_output:
             if will_be_spoken:
                 if isTTS:
