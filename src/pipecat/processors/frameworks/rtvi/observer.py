@@ -24,6 +24,7 @@ import pipecat.processors.frameworks.rtvi.models as RTVI
 from pipecat.audio.utils import calculate_audio_volume
 from pipecat.frames.frames import (
     AggregatedTextFrame,
+    AggregatedTextProgressFrame,
     AggregationType,
     BotStartedSpeakingFrame,
     BotStoppedSpeakingFrame,
@@ -42,7 +43,6 @@ from pipecat.frames.frames import (
     MetricsFrame,
     TranscriptionFrame,
     TTSAudioRawFrame,
-    TTSProgressTextFrame,
     TTSStartedFrame,
     TTSStoppedFrame,
     TTSTextFrame,
@@ -457,8 +457,8 @@ class RTVIObserver(BaseObserver):
             await self.send_rtvi_message(RTVI.BotTTSStartedMessage())
         elif isinstance(frame, TTSStoppedFrame) and self._params.bot_tts_enabled:
             await self.send_rtvi_message(RTVI.BotTTSStoppedMessage())
-        elif isinstance(frame, TTSProgressTextFrame):
-            await self._handle_tts_progress(frame)
+        elif isinstance(frame, AggregatedTextProgressFrame):
+            await self._handle_aggregated_progress(frame)
         elif isinstance(frame, AggregatedTextFrame) and (
             self._params.bot_output_enabled or self._params.bot_tts_enabled
         ):
@@ -611,8 +611,8 @@ class RTVIObserver(BaseObserver):
             # Bot hasn't started speaking yet, queue the frame
             self._queued_aggregated_text_frames.append(frame)
 
-    async def _handle_tts_progress(self, frame: TTSProgressTextFrame):
-        """Handle TTS progress frames."""
+    async def _handle_aggregated_progress(self, frame: AggregatedTextProgressFrame):
+        """Handle progress frames."""
         # 1.4.x clients use the old separate bot-output-progress event which was never
         # released, so progress events are simply not sent to legacy clients.
         if self._is_legacy_client:

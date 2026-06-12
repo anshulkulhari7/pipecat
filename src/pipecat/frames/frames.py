@@ -415,7 +415,7 @@ class TTSTextFrame(AggregatedTextFrame):
 
 
 @dataclass
-class TTSProgressTextFrame(DataFrame):
+class AggregatedTextProgressFrame(DataFrame):
     """Progress frame emitted alongside each TTSTextFrame during word-timestamp playback.
 
     Carries the spoken-so-far / remaining-text breakdown for the active
